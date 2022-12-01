@@ -37,6 +37,12 @@ class EventType:
     WS_DISCONNECT = 'websocket.disconnect'
     WS_CLOSE = 'websocket.close'
 
+    WS_PUBLISH = 'websocket.publish'
+    WS_SUBSCRIBE = 'websocket.subscribe'
+    WS_UNSUBSCRIBE= 'websocket.unsubscribe'
+
+    
+
 
 class ScopeType:
     """Standard ASGI event type strings."""

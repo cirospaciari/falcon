@@ -24,7 +24,6 @@ _WebSocketState = Enum('_WebSocketState', 'HANDSHAKE ACCEPTED CLOSED')
 
 __all__ = ['WebSocket']
 
-
 class WebSocket:
     """Represents a single WebSocket connection with a client.
 
@@ -49,6 +48,7 @@ class WebSocket:
         '_asgi_send',
         '_buffered_receiver',
         '_close_code',
+        '_extensions',
         '_supports_accept_headers',
         '_mh_bin_deserialize',
         '_mh_bin_serialize',
@@ -75,6 +75,7 @@ class WebSocket:
         # NOTE(kgriffs): Normalize the iterable to a stable tuple; note that
         #   ordering is significant, and so we preserve it here.
         self.subprotocols = tuple(scope.get('subprotocols', []))
+        self._extensions = scope.get('extensions', {})
 
         # TODO(kgriffs): Should we make the use of _BufferedReceiver
         #   configurable? For example, if the developer knows that
@@ -308,6 +309,122 @@ class WebSocket:
                     'bytes': self._mh_bin_serialize(media),
                 }
             )
+
+    async def subscribe(self, topic: str) -> None:
+        """Subscribe to an topic
+
+        Arguments:
+            topic (str): The topic to be subscribed.
+        """
+
+        self._require_accepted()
+
+        if not self._extensions.get(EventType.WS_SUBSCRIBE, False):
+            raise TypeError('% is not supported by this ASGI server' % EventType.WS_SUBSCRIBE)
+        
+        # NOTE(cirospaciari): We have to check ourselves because some ASGI
+        #   servers are not very strict which can lead to hard-to-debug
+        #   errors.
+        if not isinstance(topic, str):
+            raise TypeError('payload must be a string')
+
+        await self._send(
+            {
+                'type': EventType.WS_SUBSCRIBE,
+                'topic': topic,
+            }
+        )
+    async def unsubscribe(self, topic: str) -> None:
+        """ Unsubscribe to an topic
+
+        Arguments:
+            topic (str): The topic to be unsubscribed.
+        """
+
+        self._require_accepted()
+
+        if not self._extensions.get(EventType.WS_UNSUBSCRIBE, False):
+            raise TypeError('% is not supported by this ASGI server' % EventType.WS_UNSUBSCRIBE)
+        
+        # NOTE(cirospaciari): We have to check ourselves because some ASGI
+        #   servers are not very strict which can lead to hard-to-debug
+        #   errors.
+        if not isinstance(topic, str):
+            raise TypeError('payload must be a string')
+
+        await self._send(
+            {
+                'type': EventType.WS_UNSUBSCRIBE,
+                'topic': topic,
+            }
+        )
+
+    async def publish_data(self, topic: str, payload: Union[bytes, bytearray, memoryview]) -> None:
+        
+        """Send a message to the topic with a binary data payload.
+
+        Arguments:
+            topic (str): The topic to receive the message.
+            payload (Union[bytes, bytearray, memoryview]): The binary data to send.
+        """
+
+        self._require_accepted()
+
+        if not self._extensions.get(EventType.WS_PUBLISH, False):
+            raise TypeError('% is not supported by this ASGI server' % EventType.WS_PUBLISH)
+        
+        # NOTE(cirospaciari): We have to check ourselves because some ASGI
+        #   servers are not very strict which can lead to hard-to-debug
+        #   errors.
+        if not isinstance(topic, str):
+            raise TypeError('topic must be a string')
+
+        # NOTE(kgriffs): We have to check ourselves because some ASGI
+        #   servers are not very strict which can lead to hard-to-debug
+        #   errors.
+        if not isinstance(payload, (bytes, bytearray, memoryview)):
+            raise TypeError('payload must be a byte string')
+
+        await self._send(
+            {
+                'type': WS_PUBLISH,
+                'topic': topic,
+                'bytes': bytes(payload),
+            }
+        )
+    async def publish_text(self, topic: str, payload: str) -> None:
+        
+        """Send a message to the topic with a Unicode string payload.
+
+        Arguments:
+            topic (str): The topic to receive the message.
+            payload (str): The string to send.
+        """
+
+        self._require_accepted()
+
+        if not self._extensions.get(EventType.WS_PUBLISH, False):
+            raise TypeError('% is not supported by this ASGI server' % EventType.WS_PUBLISH)
+        
+        # NOTE(cirospaciari): We have to check ourselves because some ASGI
+        #   servers are not very strict which can lead to hard-to-debug
+        #   errors.
+        if not isinstance(topic, str):
+            raise TypeError('topic must be a string')
+
+        # NOTE(kgriffs): We have to check ourselves because some ASGI
+        #   servers are not very strict which can lead to hard-to-debug
+        #   errors.
+        if not isinstance(payload, str):
+            raise TypeError('payload must be a string')
+
+        await self._send(
+            {
+                'type': EventType.WS_PUBLISH,
+                'topic': topic,
+                'text': payload,
+            }
+        )
 
     async def send_text(self, payload: str) -> None:
         """Send a message to the client with a Unicode string payload.
