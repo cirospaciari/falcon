@@ -986,6 +986,7 @@ class App(falcon.app.App):
             send,
             self.ws_options.media_handlers,
             self.ws_options.max_receive_queue,
+            self.ws_options.enable_buffered_receiver,
         )
 
         on_websocket = None

@@ -69,6 +69,7 @@ class WebSocket:
             Union[media.BinaryBaseHandlerWS, media.TextBaseHandlerWS],
         ],
         max_receive_queue: int,
+        enable_buffered_receiver: bool
     ):
         self._supports_accept_headers = ver != '2.0'
 
@@ -83,8 +84,12 @@ class WebSocket:
         #   will be able to find out about the 'websocket.disconnect'
         #   event via one of their receive() calls, and there is no
         #   need for the added overhead.
-        self._buffered_receiver = _BufferedReceiver(receive, max_receive_queue)
-        self._asgi_receive = self._buffered_receiver.receive
+        if enable_buffered_receiver:
+            self._buffered_receiver = _BufferedReceiver(receive, max_receive_queue)
+            self._asgi_receive = self._buffered_receiver.receive
+        else:
+            self._buffered_receiver = None
+            self._asgi_receive = receive
         self._asgi_send = send
 
         mh_text = media_handlers[WebSocketPayloadType.TEXT]
@@ -106,14 +111,14 @@ class WebSocket:
     def closed(self) -> bool:
         return (
             self._state == _WebSocketState.CLOSED
-            or self._buffered_receiver.client_disconnected
+            or (self._buffered_receiver and self._buffered_receiver.client_disconnected)
         )
 
     @property
     def ready(self) -> bool:
         return (
             self._state == _WebSocketState.ACCEPTED
-            and not self._buffered_receiver.client_disconnected
+            and (not self._buffered_receiver or not self._buffered_receiver.client_disconnected)
         )
 
     @property
@@ -211,7 +216,8 @@ class WebSocket:
         await self._send(event)
         self._state = _WebSocketState.ACCEPTED
 
-        self._buffered_receiver.start()
+        if self._buffered_receiver:
+            self._buffered_receiver.start()
 
         # NOTE(kgriffs): We have to buffer received events so that we
         #   will know when a disconnect happens and we can alert the app
@@ -242,7 +248,8 @@ class WebSocket:
 
         # NOTE(kgriffs): Do this first to be sure we clean things up
         #   in the case that we are going to raise an error next.
-        await self._buffered_receiver.stop()
+        if self._buffered_receiver:
+            await self._buffered_receiver.stop()
 
         if code is None:
             code = WSCloseCode.NORMAL
@@ -387,7 +394,7 @@ class WebSocket:
 
         await self._send(
             {
-                'type': WS_PUBLISH,
+                'type': EventType.WS_PUBLISH,
                 'topic': topic,
                 'bytes': bytes(payload),
             }
@@ -551,7 +558,7 @@ class WebSocket:
         return self._mh_bin_deserialize(data)
 
     async def _send(self, msg: dict):
-        if self._buffered_receiver.client_disconnected:
+        if self._buffered_receiver and self._buffered_receiver.client_disconnected:
             self._state = _WebSocketState.CLOSED
             self._close_code = self._buffered_receiver.client_disconnected_code
             raise errors.WebSocketDisconnected(self._close_code)
@@ -645,7 +652,7 @@ class WebSocketOptions:
 
     """
 
-    __slots__ = ['error_close_code', 'max_receive_queue', 'media_handlers']
+    __slots__ = ['error_close_code', 'max_receive_queue', 'media_handlers', 'enable_buffered_receiver']
 
     def __init__(self):
         try:
@@ -687,6 +694,8 @@ class WebSocketOptions:
         #       * https://websockets.readthedocs.io/en/stable/deployment.html#buffers
         #
         self.max_receive_queue: int = 4
+
+        self.enable_buffered_receiver: bool = True
 
 
 class _BufferedReceiver:
